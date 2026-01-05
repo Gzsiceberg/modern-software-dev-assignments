@@ -87,3 +87,32 @@ def _looks_imperative(sentence: str) -> bool:
         "investigate",
     }
     return first.lower() in imperative_starters
+
+
+def extract_action_items_llm(text: str) -> List[str]:
+    if not text or not text.strip():
+        return []
+
+    response = chat(
+        model="llama3.1:8b",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are an action item extraction assistant. Your task is to identify and extract action items from meeting notes or any text. Return only the action items as a JSON array of strings. Each action item should be a clear, concise statement of something that needs to be done. If no action items are found, return an empty array.",
+            },
+            {"role": "user", "content": text},
+        ],
+        format={"type": "array", "items": {"type": "string"}},
+    )
+
+    content = response.get("message", {}).get("content", "")
+    if content:
+        print(f"LLM extraction content: {content}")
+        try:
+            items = json.loads(content)
+            if isinstance(items, list):
+                return [str(item) for item in items if item]
+        except json.JSONDecodeError:
+            pass
+
+    return []
