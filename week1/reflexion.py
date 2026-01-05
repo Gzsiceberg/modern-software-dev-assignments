@@ -96,7 +96,13 @@ def your_build_reflexion_context(prev_code: str, failures: List[str]) -> str:
 
     Return a string that will be sent as the user content alongside the reflexion system prompt.
     """
-    return ""
+    return f"""
+    review the code below:
+{prev_code}
+    The following test cases failed:
+{chr(10).join(failures)}
+    Please provide an improved implementation of the is_valid_password function that addresses these failures.
+    """
 
 
 def apply_reflexion(
