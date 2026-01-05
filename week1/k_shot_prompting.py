@@ -4,10 +4,20 @@ from ollama import chat
 
 load_dotenv()
 
-NUM_RUNS_TIMES = 5
+NUM_RUNS_TIMES = 100
+
+def reverse_string(s: str) -> str:
+    return s[::-1]
 
 # TODO: Fill this in!
-YOUR_SYSTEM_PROMPT = ""
+YOUR_SYSTEM_PROMPT = f"""
+Here are some examples of reversing the order of letters in a word:
+
+http => {reverse_string("http")}
+status => {reverse_string("status")}
+api => {reverse_string("api")}
+
+"""
 
 USER_PROMPT = """
 Reverse the order of letters in the following word. Only output the reversed word, no other text:
@@ -39,8 +49,9 @@ def test_your_prompt(system_prompt: str) -> bool:
             return True
         else:
             print(f"Expected output: {EXPECTED_OUTPUT}")
-            print(f"Actual output: {output_text}")
+            print(f"Actual output: {output_text} => {reverse_string(output_text)}")
     return False
 
 if __name__ == "__main__":
+    print(YOUR_SYSTEM_PROMPT)
     test_your_prompt(YOUR_SYSTEM_PROMPT)
