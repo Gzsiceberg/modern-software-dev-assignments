@@ -56,7 +56,7 @@ def YOUR_CONTEXT_PROVIDER(corpus: List[str]) -> List[str]:
 
     For example, return [] to simulate missing context, or [corpus[0]] to include the API docs.
     """
-    return []
+    return [corpus[0]]  # Example: return the first document (API docs)
 
 
 def make_user_prompt(question: str, context_docs: List[str]) -> str:
