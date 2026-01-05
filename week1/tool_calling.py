@@ -70,7 +70,29 @@ TOOL_REGISTRY: Dict[str, Callable[..., str]] = {
 # ==========================
 
 # TODO: Fill this in!
-YOUR_SYSTEM_PROMPT = ""
+YOUR_SYSTEM_PROMPT = """
+If you are using tools, respond in the format {"tool": function name, "args": dictionary of file_path}. Do not use variables.
+{
+    "type": "function",
+    "functions": [
+        {
+            "name": "output_every_func_return_type",
+            "description": "Return a newline-delimited list of 'name: return_type' for each top-level function in the specified Python file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "The path to the Python file to analyze. If empty, use the current file."
+                        "default": "week1/tool_calling.py"
+                    }
+                },
+                "required": []
+            }
+        }
+    ]
+}
+"""
 
 
 def resolve_path(p: str) -> str:
