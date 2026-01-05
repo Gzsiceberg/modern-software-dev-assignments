@@ -9,7 +9,7 @@ load_dotenv()
 NUM_RUNS_TIMES = 5
 
 # TODO: Fill this in! Try to get as close to 100% correctness across all runs as possible.
-YOUR_SYSTEM_PROMPT = ""
+YOUR_SYSTEM_PROMPT = "Before answering, think through the problem step-by-step to ensure accuracy."
 
 USER_PROMPT = """
 Solve this problem, then give the final answer on the last line as "Answer: <number>".
