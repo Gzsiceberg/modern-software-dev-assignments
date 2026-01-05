@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import os
-import re
-from typing import List
 import json
-from typing import Any
-from ollama import chat
+import re
+
 from dotenv import load_dotenv
+from ollama import chat
 
 load_dotenv()
 
@@ -31,9 +29,9 @@ def _is_action_line(line: str) -> bool:
     return False
 
 
-def extract_action_items(text: str) -> List[str]:
+def extract_action_items(text: str) -> list[str]:
     lines = text.splitlines()
-    extracted: List[str] = []
+    extracted: list[str] = []
     for raw_line in lines:
         line = raw_line.strip()
         if not line:
@@ -56,7 +54,7 @@ def extract_action_items(text: str) -> List[str]:
                 extracted.append(s)
     # Deduplicate while preserving order
     seen: set[str] = set()
-    unique: List[str] = []
+    unique: list[str] = []
     for item in extracted:
         lowered = item.lower()
         if lowered in seen:
@@ -89,7 +87,7 @@ def _looks_imperative(sentence: str) -> bool:
     return first.lower() in imperative_starters
 
 
-def extract_action_items_llm(text: str) -> List[str]:
+def extract_action_items_llm(text: str) -> list[str]:
     if not text or not text.strip():
         return []
 
