@@ -1,15 +1,19 @@
-import inspect
+import asyncio
 import json
 import os
+from dataclasses import dataclass
 
-from openai import OpenAI
 from dotenv import load_dotenv
-from pathlib import Path
+from fastmcp import Client
+from openai import OpenAI
 from typing import Any, Dict, List, Tuple
+from rich import print
 
 load_dotenv()
 
 openai_client = OpenAI(api_key=os.environ["OPENAI_API_KEY"], base_url="https://api.poe.com/v1")
+
+DEFAULT_MCP_SERVER_URL = os.environ.get("SIMPLE_MCP_SERVER_URL", "http://127.0.0.1:8000/mcp")
 
 SYSTEM_PROMPT = """
 You are a coding assistant whose goal it is to help us solve coding tasks. 
@@ -27,97 +31,134 @@ YOU_COLOR = "\u001b[94m"
 ASSISTANT_COLOR = "\u001b[93m"
 RESET_COLOR = "\u001b[0m"
 
-def resolve_abs_path(path_str: str) -> Path:
-    """
-    file.py -> /Users/home/mihail/modern-software-dev-lectures/file.py
-    """
-    path = Path(path_str).expanduser()
-    if not path.is_absolute():
-        path = (Path.cwd() / path).resolve()
-    return path
 
-def read_file_tool(filename: str) -> Dict[str, Any]:
-    """
-    Gets the full content of a file provided by the user.
-    :param filename: The name of the file to read.
-    :return: The full content of the file.
-    """
-    full_path = resolve_abs_path(filename)
-    print(full_path)
-    with open(str(full_path), "r") as f:
-        content = f.read()
-    return {
-        "file_path": str(full_path),
-        "content": content
+@dataclass
+class MCPToolInfo:
+    name: str
+    description: str | None
+    input_schema: Dict[str, Any]
+
+
+class SimpleMCPToolClient:
+    def __init__(self, server_url: str):
+        self.server_url = server_url
+
+    async def _list_tools_async(self):
+        client = Client(self.server_url)
+        async with client:
+            return await client.list_tools()
+
+    def list_tools(self):
+        return asyncio.run(self._list_tools_async())
+
+    async def _call_tool_async(self, name: str, arguments: Dict[str, Any] | None):
+        client = Client(self.server_url)
+        async with client:
+            return await client.call_tool(
+                name=name,
+                arguments=arguments or {},
+                raise_on_error=False,
+            )
+
+    def call_tool(self, name: str, arguments: Dict[str, Any] | None):
+        return asyncio.run(self._call_tool_async(name, arguments))
+
+
+mcp_client = SimpleMCPToolClient(DEFAULT_MCP_SERVER_URL)
+TOOL_REGISTRY: Dict[str, MCPToolInfo] = {}
+
+
+def refresh_tool_registry():
+    global TOOL_REGISTRY
+    try:
+        remote_tools = mcp_client.list_tools()
+    except Exception as exc:
+        print(
+            f"Unable to reach MCP server at {mcp_client.server_url}. "
+            f"Error: {exc}"
+        )
+        TOOL_REGISTRY = {}
+        return
+    TOOL_REGISTRY = {
+        tool.name: MCPToolInfo(
+            name=tool.name,
+            description=tool.description,
+            input_schema=getattr(tool, "inputSchema", {}) or {},
+        )
+        for tool in remote_tools
     }
 
-def list_files_tool(path: str) -> Dict[str, Any]:
-    """
-    Lists the files in a directory provided by the user.
-    :param path: The path to a directory to list files from.
-    :return: A list of files in the directory.
-    """
-    full_path = resolve_abs_path(path)
-    all_files = []
-    for item in full_path.iterdir():
-        all_files.append({
-            "filename": item.name,
-            "type": "file" if item.is_file() else "dir"
-        })
-    return {
-        "path": str(full_path),
-        "files": all_files
-    }
 
-def edit_file_tool(path: str, old_str: str, new_str: str) -> Dict[str, Any]:
-    """
-    Replaces first occurrence of old_str with new_str in file. If old_str is empty,
-    create/overwrite file with new_str.
-    :param path: The path to the file to edit.
-    :param old_str: The string to replace.
-    :param new_str: The string to replace with.
-    :return: A dictionary with the path to the file and the action taken.
-    """
-    full_path = resolve_abs_path(path)
-    if old_str == "":
-        full_path.write_text(new_str, encoding="utf-8")
-        return {
-            "path": str(full_path),
-            "action": "created_file"
-        }
-    original = full_path.read_text(encoding="utf-8")
-    if original.find(old_str) == -1:
-        return {
-            "path": str(full_path),
-            "action": "old_str not found"
-        }
-    edited = original.replace(old_str, new_str, 1)
-    full_path.write_text(edited, encoding="utf-8")
-    return {
-        "path": str(full_path),
-        "action": "edited"
-    }
-    
+def format_input_schema(schema: Dict[str, Any]) -> str:
+    properties = schema.get("properties", {})
+    if not properties:
+        return "(no parameters)"
+    required = set(schema.get("required", []))
+    formatted = []
+    for prop_name, prop_schema in properties.items():
+        type_name = prop_schema.get("type", "any")
+        if prop_name in required:
+            formatted.append(f"{prop_name}: {type_name}")
+        else:
+            formatted.append(f"{prop_name}: Optional[{type_name}]")
+    return f"({', '.join(formatted)})"
 
-TOOL_REGISTRY = {
-    "read_file": read_file_tool,
-    "list_files": list_files_tool,
-    "edit_file": edit_file_tool 
-}
+
+def serialize_tool_result(result) -> Dict[str, Any]:
+    if result.is_error:
+        error_texts = [
+            getattr(block, "text", str(block)) for block in (result.content or [])
+        ]
+        message = error_texts[0] if error_texts else "Tool execution failed"
+        return {"error": message}
+    if result.data is not None:
+        return result.data
+    if result.structured_content:
+        return result.structured_content
+    content_blocks = []
+    for block in result.content or []:
+        if hasattr(block, "text") and block.text is not None:
+            content_blocks.append(block.text)
+        elif hasattr(block, "model_dump"):
+            content_blocks.append(block.model_dump(exclude_none=True))
+        else:
+            content_blocks.append(str(block))
+    if not content_blocks:
+        return {"status": "ok"}
+    if len(content_blocks) == 1:
+        return {"result": content_blocks[0]}
+    return {"result": content_blocks}
+
+
+def execute_tool(name: str, args: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    if name not in TOOL_REGISTRY:
+        return {"error": f"Unknown tool '{name}'"}
+    try:
+        result = mcp_client.call_tool(name, args or {})
+        return serialize_tool_result(result)
+    except Exception as exc:
+        return {"error": f"Failed to execute tool '{name}': {exc}"}
+
 
 def get_tool_str_representation(tool_name: str) -> str:
     tool = TOOL_REGISTRY[tool_name]
+    description = (tool.description or "No description provided.").strip()
+    signature = format_input_schema(tool.input_schema)
     return f"""
-    Name: {tool_name}
-    Description: {tool.__doc__}
-    Signature: {inspect.signature(tool)}
+    Name: {tool.name}
+    Description: {description}
+    Signature: {signature}
     """
 
+
 def get_full_system_prompt():
-    tool_str_repr = ""
-    for tool_name in TOOL_REGISTRY:
-        tool_str_repr += "TOOL\n===" + get_tool_str_representation(tool_name)
-        tool_str_repr += f"\n{"="*15}\n"
+    if not TOOL_REGISTRY:
+        tool_str_repr = "No MCP tools are currently available."
+    else:
+        tool_str_repr = ""
+        for tool_name in TOOL_REGISTRY:
+            tool_str_repr += "TOOL\n===" + get_tool_str_representation(tool_name)
+            tool_str_repr += f"\n{"="*15}\n"
     return SYSTEM_PROMPT.format(tool_list_repr=tool_str_repr)
 
 def extract_tool_invocations(text: str) -> List[Tuple[str, Dict[str, Any]]]:
@@ -152,10 +193,19 @@ def execute_llm_call(conversation: List[Dict[str, str]]):
     return response.choices[0].message.content
 
 def run_coding_agent_loop():
-    print(get_full_system_prompt())
+    refresh_tool_registry()
+    if not TOOL_REGISTRY:
+        print(
+            f"No MCP tools available. Make sure the Simple MCP server is running at "
+            f"{mcp_client.server_url}."
+        )
+        return
+    print(TOOL_REGISTRY)
+    system_prompt = get_full_system_prompt()
+    print(system_prompt)
     conversation = [{
         "role": "system",
-        "content": get_full_system_prompt()
+        "content": system_prompt
     }]
     while True:
         try:
@@ -168,7 +218,6 @@ def run_coding_agent_loop():
         })
         while True:
             assistant_response = execute_llm_call(conversation)
-            print(f"DEBUG: Assistant response: {assistant_response}")
             tool_invocations = extract_tool_invocations(assistant_response)
             if not tool_invocations:
                 print(f"{ASSISTANT_COLOR}Assistant:{RESET_COLOR}: {assistant_response}")
@@ -178,17 +227,9 @@ def run_coding_agent_loop():
                 })
                 break
             for name, args in tool_invocations:
-                tool = TOOL_REGISTRY[name]
-                resp = ""
                 print(name, args)
-                if name == "read_file":
-                    resp = tool(args.get("filename", "."))
-                elif name == "list_files":
-                    resp = tool(args.get("path", "."))
-                elif name == "edit_file":
-                    resp = tool(args.get("path", "."), 
-                                args.get("old_str", ""), 
-                                args.get("new_str", ""))
+                arg_dict = args if isinstance(args, dict) else {}
+                resp = execute_tool(name, arg_dict)
                 conversation.append({
                     "role": "user",
                     "content": f"tool_result({json.dumps(resp)})"
