@@ -24,6 +24,7 @@
     <div class="row">
       <label class="row"><input id="save_note" type="checkbox" checked /> Save as note</label>
       <button id="extract">Extract</button>
+      <button id="extract_llm">Extract LLM</button>
     </div>
 
     <div class="items" id="items"></div>
@@ -31,13 +32,13 @@
     <script>
       const $ = (sel) => document.querySelector(sel);
       const itemsEl = $('#items');
-      const btn = $('#extract');
-      btn.addEventListener('click', async () => {
+      
+      async function extractItems(endpoint) {
         const text = $('#text').value;
         const save = $('#save_note').checked;
         itemsEl.textContent = 'Extracting...';
         try {
-          const res = await fetch('/action-items/extract', {
+          const res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text, save_note: save }),
@@ -65,7 +66,10 @@
           console.error(err);
           itemsEl.textContent = 'Error extracting items';
         }
-      });
+      }
+
+      $('#extract').addEventListener('click', () => extractItems('/action-items/extract'));
+      $('#extract_llm').addEventListener('click', () => extractItems('/action-items/extract-llm'));
 
     </script>
   </body>
